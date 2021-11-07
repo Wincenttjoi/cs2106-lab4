@@ -17,7 +17,7 @@ struct mem_size_list {
 
 struct mem_size_list *lst_tracker;
 
-void insert_new_node(char* addr, int size) {
+void insert_new_node(void* addr, int size) {
   struct mem_size_node *newNode, *temp;
   newNode = (struct mem_size_node*) malloc(sizeof(struct mem_size_node));
 
@@ -70,6 +70,7 @@ void userswap_set_size(size_t size) {
 // If the SIGSEGV handler has not yet been installed when this function is called,
 // then this function should do so. 
 void *userswap_alloc(size_t size) {
+  printf("Test");
   // Initialize linked list for tracking if does not exist
   if (lst_tracker->head == NULL) {
     lst_tracker = (struct mem_size_list*) malloc(sizeof(struct mem_size_list));
@@ -85,6 +86,7 @@ void *userswap_alloc(size_t size) {
   void *addr;
   // If size is not a multiple of the page size, size should be rounded up to the next
   // multiple of the page size.
+  // ============TODO: SIZEFORMMAP LOGIC IS WRONG===========================
   size_t sizeForMmap = 0;
   size_t pagesize = sysconf(_SC_PAGE_SIZE);
   if (size <= pagesize) {
@@ -93,6 +95,7 @@ void *userswap_alloc(size_t size) {
     sizeForMmap = pagesize * 2;
   }
   addr = mmap(NULL, sizeForMmap, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+  // =========================================================================
   if (addr == MAP_FAILED) {
     printf("Mapping failed");
   } else {
@@ -110,6 +113,7 @@ void *userswap_alloc(size_t size) {
 // to the memory region must be written to the file accordingly. The file descriptor
 // should not be closed. 
 void userswap_free(void *mem) {
+  // TODO: SHOULD BE FREEING ONE NODE OF MEM PASSED IN THE PARAM.
   struct mem_size_node *ptr = lst_tracker->head;
     while (lst_tracker->head != NULL) {
       ptr = lst_tracker->head;
