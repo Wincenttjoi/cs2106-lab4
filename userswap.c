@@ -4,25 +4,41 @@
 #include <unistd.h>
 #include <signal.h>
 
-typedef struct {
-  mem_size_node *head;
-} mem_size_list;
+struct mem_size_list { 
+  struct mem_size_node *head;
+};
 
-typedef struct {
+ struct mem_size_node {
   char* starting_addr;
   int size;
   struct mem_size_node *next;
-} mem_size_node;
+};
 
-mem_size_list *lst_tracker;
+struct mem_size_list *lst_tracker;
 initialize_mem_size_list();
 
 int initialize_mem_size_list() {
-  lst_tracker = (mem_size_list*) malloc(sizeof(mem_size_list));
+  lst_tracker = (struct mem_size_list*) malloc(sizeof(struct mem_size_list));
 }
 
 void insert_new_node(char* addr, int size) {
-  
+  struct mem_size_node *newNode, *temp;
+  newNode = (struct mem_size_node*) malloc(sizeof(struct mem_size_node));
+
+  if (newNode == NULL) {
+    printf("Unable to allocate memory.");
+  } else {
+    newNode->starting_addr = addr;
+    newNode->size = size;
+    newNode->next = NULL;
+    temp = lst_tracker->head;
+    
+    // Traverse to last node
+    while (temp != NULL && temp->next != NULL) {
+      temp = temp->next;
+    }
+    temp->next = newNode;
+  }
 }
 
 // This function sets the LORM to size.
@@ -82,7 +98,7 @@ void sigsegv_handler(int signal, siginfo_t* info, void* context) {
 // to the memory region must be written to the file accordingly. The file descriptor
 // should not be closed. 
 void userswap_free(void *mem) {
-
+  
 }
 
 // This function should map the first size bytes of the file open in the file descriptor
