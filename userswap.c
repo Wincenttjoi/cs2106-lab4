@@ -1,6 +1,7 @@
 #include "userswap.h"
 #include <sys/mman.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <signal.h>
 
@@ -9,17 +10,12 @@ struct mem_size_list {
 };
 
  struct mem_size_node {
-  char* starting_addr;
+  void* starting_addr;
   int size;
   struct mem_size_node *next;
 };
 
 struct mem_size_list *lst_tracker;
-initialize_mem_size_list();
-
-int initialize_mem_size_list() {
-  lst_tracker = (struct mem_size_list*) malloc(sizeof(struct mem_size_list));
-}
 
 void insert_new_node(char* addr, int size) {
   struct mem_size_node *newNode, *temp;
@@ -41,6 +37,20 @@ void insert_new_node(char* addr, int size) {
   }
 }
 
+void page_fault_handler(void* fault_address) {
+  mprotect(fault_address, 1, PROT_READ);
+}
+
+static void sigsegv_handler(int signal, siginfo_t* info, void* context) {
+  // TODO: NEED TO CHECK IF FAULTING MEMORY ADDRESS IS TO A CONTROLLED MEMORY REGION
+  // IF NOT, RESET ACTION  TAKEN FOR A SIGSEGV SIGNAL, RETURN IMMEDIATELY,
+  // ALLOW PROGRAM TO CRASH AS IT WOULD WITHOUT THE USER SPACE SWAP LIBRARY
+  printf("Signal %d received\n", signal);
+  page_fault_handler(info->si_addr);
+  abort();
+}
+
+
 // This function sets the LORM to size.
 // If size is not a multiple of the page size, size should be rounded up to the next
 // multiple of the page size.
@@ -60,17 +70,23 @@ void userswap_set_size(size_t size) {
 // If the SIGSEGV handler has not yet been installed when this function is called,
 // then this function should do so. 
 void *userswap_alloc(size_t size) {
+  // Initialize linked list for tracking if does not exist
+  if (lst_tracker->head == NULL) {
+    lst_tracker = (struct mem_size_list*) malloc(sizeof(struct mem_size_list));
+  }
+
+  // Install sigsev
   struct sigaction sa;
   sa.sa_flags = SA_SIGINFO;
   sigemptyset(&sa.sa_mask);
   sa.sa_sigaction = sigsegv_handler;
   sigaction(SIGSEGV, &sa, NULL);
 
-  char *addr;
+  void *addr;
   // If size is not a multiple of the page size, size should be rounded up to the next
   // multiple of the page size.
-  long sizeForMmap = 0;
-  long pagesize = sysconf(_SC_PAGE_SIZE);
+  size_t sizeForMmap = 0;
+  size_t pagesize = sysconf(_SC_PAGE_SIZE);
   if (size <= pagesize) {
     sizeForMmap = pagesize;
   } else {
@@ -87,10 +103,6 @@ void *userswap_alloc(size_t size) {
   return addr;
 }
 
-void sigsegv_handler(int signal, siginfo_t* info, void* context) {
-  printf("Signal %d received\n", signal);
-  abort();
-}
 
 // mem can be assumed to be a pointer previously returned by userswap_alloc
 // or userswap_map, and that has not been previously freed.
