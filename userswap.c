@@ -98,7 +98,15 @@ void sigsegv_handler(int signal, siginfo_t* info, void* context) {
 // to the memory region must be written to the file accordingly. The file descriptor
 // should not be closed. 
 void userswap_free(void *mem) {
-  
+  struct mem_size_node *ptr = lst_tracker->head;
+    while (lst_tracker->head != NULL) {
+      ptr = lst_tracker->head;
+      lst_tracker->head = lst_tracker->head->next;
+      munmap(ptr->starting_addr, ptr->size);
+      free(ptr);
+    }
+
+  free(lst_tracker);
 }
 
 // This function should map the first size bytes of the file open in the file descriptor
