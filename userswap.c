@@ -1,7 +1,29 @@
 #include "userswap.h"
 #include <sys/mman.h>
+#include <stdio.h>
 #include <unistd.h>
 #include <signal.h>
+
+typedef struct {
+  mem_size_node *head;
+} mem_size_list;
+
+typedef struct {
+  char* starting_addr;
+  int size;
+  struct mem_size_node *next;
+} mem_size_node;
+
+mem_size_list *lst_tracker;
+initialize_mem_size_list();
+
+int initialize_mem_size_list() {
+  lst_tracker = (mem_size_list*) malloc(sizeof(mem_size_list));
+}
+
+void insert_new_node(char* addr, int size) {
+  
+}
 
 // This function sets the LORM to size.
 // If size is not a multiple of the page size, size should be rounded up to the next
@@ -41,6 +63,9 @@ void *userswap_alloc(size_t size) {
   addr = mmap(NULL, sizeForMmap, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
   if (addr == MAP_FAILED) {
     printf("Mapping failed");
+  } else {
+    // successful mapping
+    insert_new_node(addr, pagesize);
   }
 
   return addr;
