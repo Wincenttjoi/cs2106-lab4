@@ -5,6 +5,8 @@
 #include <unistd.h>
 #include <signal.h>
 
+
+
 struct mem_size_list { 
   struct mem_size_node *head;
 };
@@ -70,7 +72,6 @@ void userswap_set_size(size_t size) {
 // If the SIGSEGV handler has not yet been installed when this function is called,
 // then this function should do so. 
 void *userswap_alloc(size_t size) {
-  printf("Test");
   // Initialize linked list for tracking if does not exist
   if (lst_tracker->head == NULL) {
     lst_tracker = (struct mem_size_list*) malloc(sizeof(struct mem_size_list));
@@ -115,14 +116,21 @@ void *userswap_alloc(size_t size) {
 void userswap_free(void *mem) {
   // TODO: SHOULD BE FREEING ONE NODE OF MEM PASSED IN THE PARAM.
   struct mem_size_node *ptr = lst_tracker->head;
-    while (lst_tracker->head != NULL) {
-      ptr = lst_tracker->head;
-      lst_tracker->head = lst_tracker->head->next;
-      munmap(ptr->starting_addr, ptr->size);
-      free(ptr);
-    }
-
-  free(lst_tracker);
+  struct mem_size_node *ptr_prev;
+  if (ptr != NULL && ptr == mem) {
+    munmap(ptr->starting_addr, ptr->size);
+    free(ptr);
+  }
+  while (ptr != NULL && ptr != mem) {
+    ptr_prev = ptr;
+    ptr = ptr->next;
+  }
+  if (ptr == NULL) {
+    return;
+  }
+  ptr_prev->next = ptr->next;
+  munmap(ptr->starting_addr, ptr->size);
+  free(ptr);
 }
 
 // This function should map the first size bytes of the file open in the file descriptor
