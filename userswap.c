@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <math.h>
+#include <signal.h>
 
 
 
@@ -67,12 +68,18 @@ void page_fault_handler(void* fault_address) {
   mprotect(fault_address, 1, PROT_READ);
 }
 
-static void sigsegv_handler(int signal, siginfo_t* info, void* context) {
+static void sigsegv_handler(int sig, siginfo_t* info, void* context) {
   // TODO: NEED TO CHECK IF FAULTING MEMORY ADDRESS IS TO A CONTROLLED MEMORY REGION
   // IF NOT, RESET ACTION  TAKEN FOR A SIGSEGV SIGNAL, RETURN IMMEDIATELY,
   // ALLOW PROGRAM TO CRASH AS IT WOULD WITHOUT THE USER SPACE SWAP LIBRARY
-  printf("Signal %d received\n", signal);
-  page_fault_handler(info->si_addr);
+  printf("Signal %d received\n", sig);
+  if (sig == SIGSEGV) {
+    if (isInMemoryRegion(info->si_addr)) {
+      page_fault_handler(info->si_addr);
+    } else {
+      signal(SIGSEGV, SIG_DFL);
+    }
+  }
 }
 
 
