@@ -40,6 +40,29 @@ void insert_new_node(void* addr, int size) {
   }
 }
 
+int isInMemoryRegion(void* fault_address) {
+  struct mem_size_node *temp;
+  int res = 0;
+  char* addr = (char*) fault_address;
+  temp = lst_tracker->head;
+  if (lst_tracker->head == NULL) {
+    return res;
+  } 
+
+  while (temp != NULL) {
+    char* temp_starting_address = (char*) temp->starting_addr;
+    char* temp_ending_address = temp->size + temp_starting_address;
+    if (addr >= temp_starting_address && addr <= temp_ending_address) {
+      res = 1;
+      break;
+    }
+    temp = temp->next;
+  }
+
+
+  return res;
+}
+
 void page_fault_handler(void* fault_address) {
   mprotect(fault_address, 1, PROT_READ);
 }
@@ -50,7 +73,6 @@ static void sigsegv_handler(int signal, siginfo_t* info, void* context) {
   // ALLOW PROGRAM TO CRASH AS IT WOULD WITHOUT THE USER SPACE SWAP LIBRARY
   printf("Signal %d received\n", signal);
   page_fault_handler(info->si_addr);
-  abort();
 }
 
 
@@ -94,12 +116,15 @@ void *userswap_alloc(size_t size) {
   // multiple of the page size.
   // ============TODO: SIZEFORMMAP LOGIC IS WRONG===========================
   size_t sizeForMmap = 0;
-  size_t pagesize = sysconf(_SC_PAGE_SIZE);
+  size_t pagesize = 4096;
+  printf("pagesize %zu", pagesize);
   if (size <= pagesize) {
     sizeForMmap = pagesize;
   } else {
     sizeForMmap = ceil(size / pagesize) * pagesize;
   }
+  printf("sizeForMmap %zu", sizeForMmap);
+
   addr = mmap(NULL, sizeForMmap, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
 
   printf("Checkpoint 3");
