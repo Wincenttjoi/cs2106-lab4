@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <signal.h>
+#include <math.h>
 
 
 
@@ -93,7 +94,7 @@ void *userswap_alloc(size_t size) {
   if (size <= pagesize) {
     sizeForMmap = pagesize;
   } else {
-    sizeForMmap = pagesize * 2;
+    sizeForMmap = ceil(size / pagesize) * pagesize;
   }
   addr = mmap(NULL, sizeForMmap, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
   // =========================================================================
@@ -116,7 +117,7 @@ void *userswap_alloc(size_t size) {
 void userswap_free(void *mem) {
   // TODO: SHOULD BE FREEING ONE NODE OF MEM PASSED IN THE PARAM.
   struct mem_size_node *ptr = lst_tracker->head;
-  struct mem_size_node *ptr_prev;
+  struct mem_size_node *ptr_prev = lst_tracker->head;
   if (ptr != NULL && ptr == mem) {
     munmap(ptr->starting_addr, ptr->size);
     free(ptr);

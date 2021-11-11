@@ -6,7 +6,7 @@
 #include <stdlib.h>
 
 int main(int argc, char *argv[]) {
-  printf("test");
+  printf("testsss");
   (void)argc;
   (void)argv;
   const _Bool use_userswap = 1;
