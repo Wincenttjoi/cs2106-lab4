@@ -23,13 +23,13 @@ struct mem_size_list *lst_tracker;
 void insert_new_node(void* addr, int size) {
   struct mem_size_node *newNode, *temp;
   newNode = (struct mem_size_node*) malloc(sizeof(struct mem_size_node));
+  newNode->starting_addr = addr;
+  newNode->size = size;
+  newNode->next = NULL;
 
-  if (newNode == NULL) {
-    printf("Unable to allocate memory.");
+  if (lst_tracker->head == NULL) {
+    lst_tracker->head = newNode;
   } else {
-    newNode->starting_addr = addr;
-    newNode->size = size;
-    newNode->next = NULL;
     temp = lst_tracker->head;
     
     // Traverse to last node
@@ -74,9 +74,11 @@ void userswap_set_size(size_t size) {
 // then this function should do so. 
 void *userswap_alloc(size_t size) {
   // Initialize linked list for tracking if does not exist
-  if (lst_tracker->head == NULL) {
+  if (lst_tracker == NULL) {
     lst_tracker = (struct mem_size_list*) malloc(sizeof(struct mem_size_list));
   }
+
+  printf("Checkpoint 1");
 
   // Install sigsev
   struct sigaction sa;
@@ -84,6 +86,8 @@ void *userswap_alloc(size_t size) {
   sigemptyset(&sa.sa_mask);
   sa.sa_sigaction = sigsegv_handler;
   sigaction(SIGSEGV, &sa, NULL);
+
+  printf("Checkpoint 2");
 
   void *addr;
   // If size is not a multiple of the page size, size should be rounded up to the next
@@ -97,13 +101,19 @@ void *userswap_alloc(size_t size) {
     sizeForMmap = ceil(size / pagesize) * pagesize;
   }
   addr = mmap(NULL, sizeForMmap, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+
+  printf("Checkpoint 3");
+
   // =========================================================================
   if (addr == MAP_FAILED) {
     printf("Mapping failed");
   } else {
     // successful mapping
-    insert_new_node(addr, pagesize);
+    insert_new_node(addr, sizeForMmap);
   }
+
+  printf("Checkpoint 4");
+
 
   return addr;
 }
