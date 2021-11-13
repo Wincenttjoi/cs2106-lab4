@@ -15,6 +15,8 @@ size_t pagesize = 4096;
 
 size_t LORM = 8626176;
 
+int total_resident_bytes = 0;
+
 struct mem_size_node {
   void* starting_addr;
   int size;
@@ -93,6 +95,9 @@ void insert_new_resident_node(void* addr) {
     }
     temp->next = newNode;
   }
+
+
+  total_resident_bytes += pagesize;
 }
 
 // Returns 1 if its in virtual memory region (can be found in virtual memory linked list)
@@ -117,6 +122,7 @@ int isInVirtualMemoryRegion(void* fault_address) {
   return res;
 }
 
+// Returns the starting address of the resident page
 void* get_resident_address(void* address) {
   struct resident_node *temp;
   if (resident_mem_list->head == NULL) {
@@ -133,6 +139,25 @@ void* get_resident_address(void* address) {
   return NULL;
 }
 
+void evict_page() {
+  // Removes the first page in resident linked list
+  struct resident_node *temp = resident_mem_list->head;
+  void *addr = resident_mem_list->head->starting_addr;
+
+  if (resident_mem_list->head->next != NULL) {
+    resident_mem_list->head = resident_mem_list->head->next;
+  }
+
+  free(temp);
+
+  total_resident_bytes -= pagesize;
+
+  // Change the virtual mem node to be PROT_NONE
+
+  mprotect(addr, pagesize, PROT_NONE);
+
+}
+
 
 void page_fault_handler(void* fault_address) {
   fault_address = align_address_to_start_page(fault_address);
@@ -140,9 +165,14 @@ void page_fault_handler(void* fault_address) {
   struct resident_node* temp_resident_node = get_resident_address(fault_address);
   int is_resident = temp_resident_node != NULL;
 
+  while (total_resident_bytes + pagesize > LORM) {
+    evict_page();
+  }
+
   if (!is_resident) {
+    // make the address resident
     insert_new_resident_node(fault_address);
-    mprotect(fault_address, 1, PROT_READ);
+    mprotect(fault_address, pagesize, PROT_READ);
   } else {
     mprotect(fault_address, pagesize, PROT_READ | PROT_WRITE);
     temp_resident_node->is_dirty = DIRTY;
