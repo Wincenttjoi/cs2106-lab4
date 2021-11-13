@@ -2,12 +2,13 @@
 #include <sys/mman.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <unistd.h>
 #include <signal.h>
 #include <math.h>
 #include <signal.h>
 
-
+size_t pagesize = 4096;
 
 struct mem_size_list { 
   struct mem_size_node *head;
@@ -19,7 +20,22 @@ struct mem_size_list {
   struct mem_size_node *next;
 };
 
-struct mem_size_list *lst_tracker;
+struct mem_size_list *virtual_mem_list;
+struct mem_size_list *physical_mem_list;
+
+void* align_address_to_start_page(void* address) {
+  return (void*)(((uintptr_t)address) & ~(pagesize-1));
+}
+
+void initialize_mem_list() {
+  if (virtual_mem_list == NULL) {
+    virtual_mem_list = (struct mem_size_list*) malloc(sizeof(struct mem_size_list));
+  }
+
+  if (physical_mem_list == NULL) {
+    physical_mem_list = (struct mem_size_list*) malloc(sizeof(struct mem_size_list));
+  }
+}
 
 void insert_new_node(void* addr, int size) {
   struct mem_size_node *newNode, *temp;
@@ -28,10 +44,10 @@ void insert_new_node(void* addr, int size) {
   newNode->size = size;
   newNode->next = NULL;
 
-  if (lst_tracker->head == NULL) {
-    lst_tracker->head = newNode;
+  if (virtual_mem_list->head == NULL) {
+    virtual_mem_list->head = newNode;
   } else {
-    temp = lst_tracker->head;
+    temp = virtual_mem_list->head;
     
     // Traverse to last node
     while (temp != NULL && temp->next != NULL) {
@@ -41,12 +57,13 @@ void insert_new_node(void* addr, int size) {
   }
 }
 
-int isInMemoryRegion(void* fault_address) {
+
+int isInVirtualMemoryRegion(void* fault_address) {
   struct mem_size_node *temp;
   int res = 0;
   char* addr = (char*) fault_address;
-  temp = lst_tracker->head;
-  if (lst_tracker->head == NULL) {
+  temp = virtual_mem_list->head;
+  if (virtual_mem_list->head == NULL) {
     return res;
   } 
 
@@ -74,7 +91,7 @@ static void sigsegv_handler(int sig, siginfo_t* info, void* context) {
   // ALLOW PROGRAM TO CRASH AS IT WOULD WITHOUT THE USER SPACE SWAP LIBRARY
   printf("Signal %d received\n", sig);
   if (sig == SIGSEGV) {
-    if (isInMemoryRegion(info->si_addr)) {
+    if (isInVirtualMemoryRegion(info->si_addr)) {
       page_fault_handler(info->si_addr);
     } else {
       signal(SIGSEGV, SIG_DFL);
@@ -102,39 +119,32 @@ void userswap_set_size(size_t size) {
 // If the SIGSEGV handler has not yet been installed when this function is called,
 // then this function should do so. 
 void *userswap_alloc(size_t size) {
-  // Initialize linked list for tracking if does not exist
-  if (lst_tracker == NULL) {
-    lst_tracker = (struct mem_size_list*) malloc(sizeof(struct mem_size_list));
-  }
+  // Initialize
+  initialize_mem_list();
+  void *addr;
 
-  printf("Checkpoint 1");
-
-  // Install sigsev
+  // ========================Install sigsev=================================
   struct sigaction sa;
   sa.sa_flags = SA_SIGINFO;
   sigemptyset(&sa.sa_mask);
   sa.sa_sigaction = sigsegv_handler;
   sigaction(SIGSEGV, &sa, NULL);
 
-  printf("Checkpoint 2");
 
-  void *addr;
+
   // If size is not a multiple of the page size, size should be rounded up to the next
   // multiple of the page size.
-  // ============TODO: SIZEFORMMAP LOGIC IS WRONG===========================
+  // ========================================================================
   size_t sizeForMmap = 0;
-  size_t pagesize = 4096;
-  printf("pagesize %zu", pagesize);
+
   if (size <= pagesize) {
     sizeForMmap = pagesize;
   } else {
-    sizeForMmap = ceil(size / pagesize) * pagesize;
+    sizeForMmap = (int) (ceil((double)size / (double)pagesize) * pagesize);
   }
-  printf("sizeForMmap %zu", sizeForMmap);
 
   addr = mmap(NULL, sizeForMmap, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
 
-  printf("Checkpoint 3");
 
   // =========================================================================
   if (addr == MAP_FAILED) {
@@ -143,9 +153,6 @@ void *userswap_alloc(size_t size) {
     // successful mapping
     insert_new_node(addr, sizeForMmap);
   }
-
-  printf("Checkpoint 4");
-
 
   return addr;
 }
@@ -158,8 +165,8 @@ void *userswap_alloc(size_t size) {
 // should not be closed. 
 void userswap_free(void *mem) {
   // TODO: SHOULD BE FREEING ONE NODE OF MEM PASSED IN THE PARAM.
-  struct mem_size_node *ptr = lst_tracker->head;
-  struct mem_size_node *ptr_prev = lst_tracker->head;
+  struct mem_size_node *ptr = virtual_mem_list->head;
+  struct mem_size_node *ptr_prev = virtual_mem_list->head;
   if (ptr != NULL && ptr == mem) {
     munmap(ptr->starting_addr, ptr->size);
     free(ptr);
