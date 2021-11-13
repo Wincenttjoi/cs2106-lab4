@@ -7,6 +7,7 @@
 #include <signal.h>
 #include <math.h>
 #include <signal.h>
+#include <fcntl.h>
 
 #define DIRTY 1
 #define NOT_DIRTY 0
@@ -151,7 +152,23 @@ void* get_resident_address(void* address) {
   return NULL;
 }
 
+char* existing_swap;
+
+void replace_swap(struct resident_node *resident_node) {
+
+  if (existing_swap != NULL) {
+    remove(existing_swap);
+  }
+
+  pid_t pid = getpid();
+  char* pathname = strcat(((char *) pid), ".swap");
+  existing_swap = pathname;
+  int fd = open(pathname, O_CREAT);
+  write(fd, resident_node->starting_addr, pagesize);
+}
+
 void evict_page() {
+
   // Removes the first page in resident linked list
   struct resident_node *temp = resident_mem_list->head;
   void *addr = resident_mem_list->head->starting_addr;
@@ -160,13 +177,20 @@ void evict_page() {
     resident_mem_list->head = resident_mem_list->head->next;
   }
 
+  // Regard, write new contents to a swap file, 
+  // physical page is freed by madvise on the page
+  // TODO: Write to swap file
+
+  if (temp->is_dirty == DIRTY) {
+    replace_swap(temp);
+  }
+
+  mprotect(addr, pagesize, PROT_NONE);
+  madvise(addr, pagesize, MADV_DONTNEED);
+
   free(temp);
 
   total_resident_bytes -= pagesize;
-
-  // Change the virtual mem node to be PROT_NONE
-
-  mprotect(addr, pagesize, PROT_NONE);
 
 }
 
@@ -198,6 +222,8 @@ void page_fault_handler(void* fault_address) {
   }
 
   struct swap_file* swap_file_information = get_swap_file_info(fault_address);
+  int is_previously_evicted = swap_file_information != NULL;
+
   if (!is_resident) {
     // make the address resident
     insert_new_resident_node(fault_address);
@@ -214,8 +240,9 @@ static void sigsegv_handler(int sig, siginfo_t* info, void* context) {
   // IF NOT, RESET ACTION  TAKEN FOR A SIGSEGV SIGNAL, RETURN IMMEDIATELY,
   // ALLOW PROGRAM TO CRASH AS IT WOULD WITHOUT THE USER SPACE SWAP LIBRARY
   if (sig == SIGSEGV) {
-    if (isInVirtualMemoryRegion(info->si_addr)) {
-      page_fault_handler(info->si_addr);
+    void* addr = align_address_to_start_page(info->si_addr);
+    if (isInVirtualMemoryRegion(addr)) {
+      page_fault_handler(addr);
     } else {
       signal(SIGSEGV, SIG_DFL);
     }
