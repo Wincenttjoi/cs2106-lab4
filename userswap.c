@@ -29,6 +29,12 @@ struct resident_node {
   struct resident_node *next;
 };
 
+struct swap_file {
+  void* starting_addr;
+  int is_resident;
+  struct swap_file* next;
+};
+
 struct mem_size_list { 
   struct mem_size_node *head;
 };
@@ -42,6 +48,8 @@ struct mem_size_list *virtual_mem_list;
 // all resident page will be stored here
 struct resident_mem_list *resident_mem_list;
 
+struct swap_file *swap_file;
+
 void* align_address_to_start_page(void* address) {
   return (void*)(((uintptr_t)address) & ~(pagesize-1));
 }
@@ -53,6 +61,10 @@ void initialize_mem_list() {
 
   if (resident_mem_list == NULL) {
     resident_mem_list = (struct resident_mem_list*) malloc(sizeof(struct resident_mem_list));
+  }
+
+  if (swap_file == NULL) {
+    swap_file = (struct swap_file*) malloc(sizeof(struct swap_file));
   }
 }
 
@@ -158,6 +170,11 @@ void evict_page() {
 
 }
 
+struct swap_file* get_swap_file_info(void* address) {
+  struct swap_file* str = swap_file;
+  return str;
+}
+
 
 void page_fault_handler(void* fault_address) {
   fault_address = align_address_to_start_page(fault_address);
@@ -169,11 +186,13 @@ void page_fault_handler(void* fault_address) {
     evict_page();
   }
 
+  struct swap_file* swap_file_information = get_swap_file_info(fault_address);
   if (!is_resident) {
     // make the address resident
     insert_new_resident_node(fault_address);
     mprotect(fault_address, pagesize, PROT_READ);
   } else {
+    // page becomes dirty
     mprotect(fault_address, pagesize, PROT_READ | PROT_WRITE);
     temp_resident_node->is_dirty = DIRTY;
   }
