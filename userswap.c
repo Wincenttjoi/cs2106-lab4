@@ -171,8 +171,19 @@ void evict_page() {
 }
 
 struct swap_file* get_swap_file_info(void* address) {
-  struct swap_file* str = swap_file;
-  return str;
+  struct swap_file* temp = swap_file;
+  
+  if (swap_file->starting_addr == NULL) {
+    return NULL;
+  }
+
+  while (temp != NULL) {
+    if (address == temp->starting_addr) {
+      return temp;
+    }
+    temp = temp->next;
+  }
+  return NULL;
 }
 
 
