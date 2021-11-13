@@ -145,7 +145,7 @@ void* get_resident_address(void* address) {
 
   temp = resident_mem_list->head;
   while (temp != NULL) {
-    if (address == temp) {
+    if (address == temp->starting_addr) {
       return address;
     }
     temp = temp->next;

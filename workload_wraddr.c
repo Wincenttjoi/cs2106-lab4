@@ -33,6 +33,7 @@ int main(int argc, char *argv[]) {
   } else {
     free((void *)mem);
   }
-
+  printf("%d", failed);
   return failed;
+
 }
