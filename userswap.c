@@ -13,6 +13,7 @@
 
 size_t pagesize = 4096;
 
+size_t LORM = 8626176;
 
 struct mem_size_node {
   void* starting_addr;
@@ -23,7 +24,7 @@ struct mem_size_node {
 struct resident_node {
   void* starting_addr;
   int is_dirty;
-  struct mem_size_node *next;
+  struct resident_node *next;
 };
 
 struct mem_size_list { 
@@ -152,7 +153,6 @@ static void sigsegv_handler(int sig, siginfo_t* info, void* context) {
   // TODO: NEED TO CHECK IF FAULTING MEMORY ADDRESS IS TO A CONTROLLED MEMORY REGION
   // IF NOT, RESET ACTION  TAKEN FOR A SIGSEGV SIGNAL, RETURN IMMEDIATELY,
   // ALLOW PROGRAM TO CRASH AS IT WOULD WITHOUT THE USER SPACE SWAP LIBRARY
-  printf("Signal %d received\n", sig);
   if (sig == SIGSEGV) {
     if (isInVirtualMemoryRegion(info->si_addr)) {
       page_fault_handler(info->si_addr);
@@ -170,7 +170,8 @@ static void sigsegv_handler(int sig, siginfo_t* info, void* context) {
 // LORM, then the minimum number of pages should be evicted according to the
 // page eviction algorithm until the total size is under or equal to the LORM. 
 void userswap_set_size(size_t size) {
-
+  size = (int)(ceil((double) size / (double) pagesize) * pagesize);
+  LORM = size;
 }
 
 // This function should allocate size bytes of memory that is controlled by the
