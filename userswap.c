@@ -8,6 +8,7 @@
 #include <math.h>
 #include <signal.h>
 #include <fcntl.h>
+#include <string.h>
 
 #define DIRTY 1
 #define NOT_DIRTY 0
@@ -161,10 +162,21 @@ void replace_swap(struct resident_node *resident_node) {
   }
 
   pid_t pid = getpid();
-  char* pathname = strcat(((char *) pid), ".swap");
+  char* pathname;
+  char* filename = (char*)malloc(sizeof(char*));
+  sprintf(filename, "%d", (int) pid);
+  pathname = malloc(strlen(filename) + 1 + 5);
+  // sprintf(pid, "%d", (int) pid);
+  strcpy(pathname, filename);
+  strcat(pathname, ".swap");
+  // pathname += sprintf(pathname, "%d", (int) pid);
+  // pathname += sprintf(pathname, "%s", ".swap");
+  // char* pathname = strcat((char *) pid, ".swap");
   existing_swap = pathname;
-  int fd = open(pathname, O_CREAT);
-  write(fd, resident_node->starting_addr, pagesize);
+  int fd = open(pathname, O_CREAT, S_IRUSR | S_IWUSR);
+  if (write(fd, resident_node->starting_addr, pagesize) == -1) {
+    printf("Write error");
+  }
 }
 
 void evict_page() {
@@ -210,6 +222,10 @@ struct swap_file* get_swap_file_info(void* address) {
   return NULL;
 }
 
+void swap_file_restoration(void* addr, struct swap_file* swap_file) {
+
+}
+
 
 void page_fault_handler(void* fault_address) {
   fault_address = align_address_to_start_page(fault_address);
@@ -225,6 +241,11 @@ void page_fault_handler(void* fault_address) {
   int is_previously_evicted = swap_file_information != NULL;
 
   if (!is_resident) {
+    if (is_previously_evicted) {
+      mprotect(fault_address, pagesize, PROT_READ | PROT_WRITE);
+      swap_file_restoration(fault_address, swap_file_information);
+    }
+
     // make the address resident
     insert_new_resident_node(fault_address);
     mprotect(fault_address, pagesize, PROT_READ);
