@@ -166,12 +166,8 @@ void replace_swap(struct resident_node *resident_node) {
   char* filename = (char*)malloc(sizeof(char*));
   sprintf(filename, "%d", (int) pid);
   pathname = malloc(strlen(filename) + 1 + 5);
-  // sprintf(pid, "%d", (int) pid);
   strcpy(pathname, filename);
   strcat(pathname, ".swap");
-  // pathname += sprintf(pathname, "%d", (int) pid);
-  // pathname += sprintf(pathname, "%s", ".swap");
-  // char* pathname = strcat((char *) pid, ".swap");
   existing_swap = pathname;
   int fd = open(pathname, O_CREAT, S_IRUSR | S_IWUSR);
   if (write(fd, resident_node->starting_addr, pagesize) == -1) {
@@ -189,7 +185,7 @@ void evict_page() {
     resident_mem_list->head = resident_mem_list->head->next;
   }
 
-  // Regard, write new contents to a swap file, 
+  // Regard, write new contents to a swap file,
   // physical page is freed by madvise on the page
   // TODO: Write to swap file
 
@@ -203,7 +199,6 @@ void evict_page() {
   free(temp);
 
   total_resident_bytes -= pagesize;
-
 }
 
 struct swap_file* get_swap_file_info(void* address) {
@@ -223,7 +218,11 @@ struct swap_file* get_swap_file_info(void* address) {
 }
 
 void swap_file_restoration(void* addr, struct swap_file* swap_file) {
-
+  int fd = open(existing_swap, O_CREAT, S_IRUSR | S_IWUSR);
+  if (read(fd, addr, pagesize) == -1) {
+    printf("Error reading swap file");
+  }
+  swap_file->starting_addr = addr;
 }
 
 
@@ -233,14 +232,14 @@ void page_fault_handler(void* fault_address) {
   struct resident_node* temp_resident_node = get_resident_address(fault_address);
   int is_resident = temp_resident_node != NULL;
 
+  struct swap_file* swap_file_information = get_swap_file_info(fault_address);
+  int is_previously_evicted = swap_file_information != NULL;
   while (total_resident_bytes + pagesize > LORM) {
     evict_page();
   }
 
-  struct swap_file* swap_file_information = get_swap_file_info(fault_address);
-  int is_previously_evicted = swap_file_information != NULL;
-
   if (!is_resident) {
+    
     if (is_previously_evicted) {
       mprotect(fault_address, pagesize, PROT_READ | PROT_WRITE);
       swap_file_restoration(fault_address, swap_file_information);
@@ -369,6 +368,8 @@ void userswap_free(void *mem) {
   }
   temp_prev->next = temp->next;
   free(temp);
+
+  total_resident_bytes = 0;
 }
 
 // This function should map the first size bytes of the file open in the file descriptor
