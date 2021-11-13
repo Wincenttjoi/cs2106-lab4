@@ -8,20 +8,36 @@
 #include <math.h>
 #include <signal.h>
 
+#define DIRTY 1
+#define NOT_DIRTY 0
+
 size_t pagesize = 4096;
 
-struct mem_size_list { 
-  struct mem_size_node *head;
-};
 
- struct mem_size_node {
+struct mem_size_node {
   void* starting_addr;
   int size;
   struct mem_size_node *next;
 };
 
+struct resident_node {
+  void* starting_addr;
+  int is_dirty;
+  struct mem_size_node *next;
+};
+
+struct mem_size_list { 
+  struct mem_size_node *head;
+};
+
+struct resident_mem_list {
+  struct resident_node *head;
+};
+
 struct mem_size_list *virtual_mem_list;
-struct mem_size_list *physical_mem_list;
+
+// all resident page will be stored here
+struct resident_mem_list *resident_mem_list;
 
 void* align_address_to_start_page(void* address) {
   return (void*)(((uintptr_t)address) & ~(pagesize-1));
@@ -32,11 +48,12 @@ void initialize_mem_list() {
     virtual_mem_list = (struct mem_size_list*) malloc(sizeof(struct mem_size_list));
   }
 
-  if (physical_mem_list == NULL) {
-    physical_mem_list = (struct mem_size_list*) malloc(sizeof(struct mem_size_list));
+  if (resident_mem_list == NULL) {
+    resident_mem_list = (struct resident_mem_list*) malloc(sizeof(struct resident_mem_list));
   }
 }
 
+// To insert node to virtual memory
 void insert_new_node(void* addr, int size) {
   struct mem_size_node *newNode, *temp;
   newNode = (struct mem_size_node*) malloc(sizeof(struct mem_size_node));
@@ -57,16 +74,36 @@ void insert_new_node(void* addr, int size) {
   }
 }
 
+void insert_new_resident_node(void* addr) {
+  struct resident_node *newNode, *temp;
+  newNode = (struct resident_node*) malloc(sizeof(struct resident_node));
+  newNode->starting_addr = addr;
+  newNode->is_dirty = NOT_DIRTY;
+  newNode->next = NULL;
 
+  if (resident_mem_list->head == NULL) {
+    resident_mem_list->head = newNode;
+  } else {
+    temp = resident_mem_list->head;
+    
+    // Traverse to last node
+    while (temp != NULL && temp->next != NULL) {
+      temp = temp->next;
+    }
+    temp->next = newNode;
+  }
+}
+
+// Returns 1 if its in virtual memory region (can be found in virtual memory linked list)
 int isInVirtualMemoryRegion(void* fault_address) {
   struct mem_size_node *temp;
   int res = 0;
   char* addr = (char*) fault_address;
-  temp = virtual_mem_list->head;
   if (virtual_mem_list->head == NULL) {
     return res;
   } 
 
+  temp = virtual_mem_list->head;
   while (temp != NULL) {
     char* temp_starting_address = (char*) temp->starting_addr;
     char* temp_ending_address = temp->size + temp_starting_address;
@@ -76,13 +113,39 @@ int isInVirtualMemoryRegion(void* fault_address) {
     }
     temp = temp->next;
   }
-
-
   return res;
 }
 
+void* get_resident_address(void* address) {
+  struct resident_node *temp;
+  if (resident_mem_list->head == NULL) {
+    return NULL;
+  }
+
+  temp = resident_mem_list->head;
+  while (temp != NULL) {
+    if (address == temp) {
+      return address;
+    }
+    temp = temp->next;
+  }
+  return NULL;
+}
+
+
 void page_fault_handler(void* fault_address) {
-  mprotect(fault_address, 1, PROT_READ);
+  fault_address = align_address_to_start_page(fault_address);
+
+  struct resident_node* temp_resident_node = get_resident_address(fault_address);
+  int is_resident = temp_resident_node != NULL;
+
+  if (!is_resident) {
+    insert_new_resident_node(fault_address);
+    mprotect(fault_address, 1, PROT_READ);
+  } else {
+    mprotect(fault_address, pagesize, PROT_READ | PROT_WRITE);
+    temp_resident_node->is_dirty = DIRTY;
+  }
 }
 
 static void sigsegv_handler(int sig, siginfo_t* info, void* context) {
@@ -164,7 +227,7 @@ void *userswap_alloc(size_t size) {
 // to the memory region must be written to the file accordingly. The file descriptor
 // should not be closed. 
 void userswap_free(void *mem) {
-  // TODO: SHOULD BE FREEING ONE NODE OF MEM PASSED IN THE PARAM.
+  // free virtual memory allocated
   struct mem_size_node *ptr = virtual_mem_list->head;
   struct mem_size_node *ptr_prev = virtual_mem_list->head;
   if (ptr != NULL && ptr == mem) {
@@ -181,6 +244,22 @@ void userswap_free(void *mem) {
   ptr_prev->next = ptr->next;
   munmap(ptr->starting_addr, ptr->size);
   free(ptr);
+
+  // free resident memory allocated
+  struct resident_node *temp = resident_mem_list->head;
+  struct resident_node *temp_prev = resident_mem_list->head;
+  if (temp != NULL && temp == mem) {
+    free(temp);
+  }
+  while (temp != NULL && temp != mem) {
+    temp_prev = temp;
+    temp = temp->next;
+  }
+  if (temp == NULL) {
+    return;
+  }
+  temp_prev->next = temp->next;
+  free(temp);
 }
 
 // This function should map the first size bytes of the file open in the file descriptor
