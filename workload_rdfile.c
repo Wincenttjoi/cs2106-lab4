@@ -51,6 +51,6 @@ int main(int argc, char *argv[]) {
       failed = 1;
     }
   }
-
+  printf("%d", failed);
   return failed;
 }

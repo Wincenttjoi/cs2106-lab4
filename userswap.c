@@ -24,7 +24,6 @@ struct mem_size_node {
   void* starting_addr;
   int size;
   int fd;
-  int page_offset;
   struct mem_size_node *next;
 };
 
@@ -74,13 +73,13 @@ void initialize_mem_list() {
 }
 
 // To insert node to virtual memory
-void insert_new_node(void* addr, int size) {
+void insert_new_node(void* addr, int size, int fd) {
   struct mem_size_node *newNode, *temp;
   newNode = (struct mem_size_node*) malloc(sizeof(struct mem_size_node));
   newNode->starting_addr = addr;
   newNode->size = size;
   newNode->next = NULL;
-  newNode->fd = FD_DONT_EXIST;
+  newNode->fd = fd;
 
   if (virtual_mem_list->head == NULL) {
     virtual_mem_list->head = newNode;
@@ -96,33 +95,36 @@ void insert_new_node(void* addr, int size) {
 }
 
 // each node inserted needs to by pagesize, chop the size first
-void insert_new_node_map(void* addr, int size, int fd) {
-  int offset_counter = 0;
-  int total_pages = size / pagesize;
-  struct mem_size_node *newNode, *temp;
-  newNode = (struct mem_size_node*) malloc(sizeof(struct mem_size_node));
-  newNode->starting_addr = addr;
-  newNode->next = NULL;
-  newNode->fd = fd;
-  newNode->size = pagesize;
+// void insert_new_node_map(void* addr, int size, int fd) {
+//   int offset_counter = 0;
+//   int total_pages = size / pagesize;
+//   struct mem_size_node *newNode, *temp;
+//   newNode = (struct mem_size_node*) malloc(sizeof(struct mem_size_node));
+//   newNode->starting_addr = addr;
+//   newNode->next = NULL;
+//   newNode->fd = fd;
+//   newNode->size = pagesize;
 
-  while (offset_counter < total_pages) {
-    newNode->page_offset = offset_counter;
-    if (virtual_mem_list->head == NULL) {
-      virtual_mem_list->head = newNode;
-    } else {
-      temp = virtual_mem_list->head;
-      
-      // Traverse to last node
-      while (temp != NULL && temp->next != NULL) {
-        temp = temp->next;
-      }
-      temp->next = newNode;
-    }
-    offset_counter++;
-  }
+//   // traverse temp pointer to last node
+//   if (virtual_mem_list->head == NULL) {
+//     temp = virtual_mem_list->head;
+//   } else {
+//     temp = virtual_mem_list->head;
+    
+//     while (temp != NULL && temp->next != NULL) {
+//       temp = temp->next;
+//     }
+//     // temp->next = newNode;
+//   }
 
-}
+//   // append multiple new nodes with each of pagesize
+//   while (offset_counter < total_pages) {
+//     newNode->page_offset = offset_counter;
+//     temp->next = newNode;
+//     offset_counter++;
+//     temp = temp->next;
+//   }
+// }
 
 void insert_new_resident_node(void* addr) {
   struct resident_node *newNode, *temp;
@@ -299,7 +301,10 @@ struct mem_size_node* get_virtual_node(void* address) {
   temp = virtual_mem_list->head;
   // printf("temp starting address %p", temp->starting_addr);
   while (temp != NULL) {
-    if (address == temp->starting_addr) {
+    char* temp_starting_address = (char*) temp->starting_addr;
+    char* temp_ending_address = temp->size + temp_starting_address;
+    char* addr = (char*) address;
+    if (addr >= temp_starting_address && addr <= temp_ending_address) {
       return temp;
     }
     temp = temp->next;
@@ -352,11 +357,9 @@ void swap_file_restoration(void* addr) {
 }
 
 void fill_file_content(int fd, int page_offset, void* address) {
-  // int fd = open(pathname, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-  // if (pwrite(fd, resident_node->starting_addr, pagesize, offset * pagesize) == -1) {
-  //   perror("Write error");
-  // }
-  // close(fd);
+  if(pread(fd, address, pagesize, page_offset) == -1) {
+    printf("Error reading map");
+  }
 }
 
 
@@ -368,7 +371,7 @@ void page_fault_handler(void* fault_address) {
 
   struct mem_size_node* temp_virtual_node = get_virtual_node(fault_address);
   int fd = temp_virtual_node->fd;
-  int page_offset = temp_virtual_node->page_offset;
+  int page_offset = fault_address - temp_virtual_node->starting_addr;
   int is_mapping = fd != FD_DONT_EXIST;
 
   struct swap_file* swap_file_information = get_swap_file_info(fault_address);
@@ -453,8 +456,6 @@ void *userswap_alloc(size_t size) {
   sa.sa_sigaction = sigsegv_handler;
   sigaction(SIGSEGV, &sa, NULL);
 
-
-
   // If size is not a multiple of the page size, size should be rounded up to the next
   // multiple of the page size.
   // ========================================================================
@@ -474,7 +475,7 @@ void *userswap_alloc(size_t size) {
     printf("Mapping failed");
   } else {
     // successful mapping
-    insert_new_node(addr, sizeForMmap);
+    insert_new_node(addr, sizeForMmap, FD_DONT_EXIST);
   }
 
   return addr;
@@ -571,17 +572,21 @@ void *userswap_map(int fd, size_t size) {
     sizeForMmap = (int) (ceil((double)size / (double)pagesize) * pagesize);
   }
 
-  // map first size bytes of the file in file descriptor
+  // truncate size ==========================================================
+  if (ftruncate(fd, sizeForMmap) == -1) {
+    printf("Truncating fails");
+  }
+
+  // map first size bytes of the file in file descriptor =====================
 
   addr = mmap(NULL, sizeForMmap, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
-
 
   // =========================================================================
   if (addr == MAP_FAILED) {
     printf("Mapping failed");
   } else {
     // successful mapping
-    insert_new_node_map(addr, sizeForMmap, fd);
+    insert_new_node(addr, sizeForMmap, fd);
   }
 
   return addr;
