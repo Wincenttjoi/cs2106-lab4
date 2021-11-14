@@ -116,36 +116,34 @@ void insert_new_resident_node(void* addr) {
 }
 
 int insert_new_swapfile_node(void* addr) {
-  struct swap_file *newNode, *temp;
+  printf("%p\n", addr);
+  struct swap_file *newNode, *temp, *prev;
   newNode = (struct swap_file*) malloc(sizeof(struct swap_file));
   newNode->starting_addr = addr;
   newNode->next = NULL;
 
   int idx = 0;
-  if (swap_file == NULL) {
+  if (swap_file->starting_addr == NULL) {
+    newNode->page_offset = 0;
     swap_file = newNode;
   } else {
     temp = swap_file;
-    int found_free_offset = 0;
-    while (temp != NULL && temp->next != NULL) {
-      if (temp->next->page_offset == idx + 1) {
-        idx++;
-        temp = temp->next;
-      } else {
-        idx++;
-        found_free_offset = 1;
-        break;
+    prev = NULL;
+    while (temp->next != NULL) {
+      if (temp->page_offset != idx) {
+        prev->next = newNode;
+        newNode->next = temp;
+        newNode->page_offset = idx;
+        return idx;
       }
+      prev = temp;
+      temp = temp->next;
+      idx++;
     }
+    temp->next = newNode;
+    idx++;
     newNode->page_offset = idx;
-    if (found_free_offset) {
-      struct swap_file *temp2;
-      temp2 = temp->next;
-      temp->next = newNode;
-      newNode->next = temp2;
-    } else {
-      temp->next = newNode;
-    }
+    return idx;
   }
   return idx;
 }
@@ -193,7 +191,6 @@ struct resident_node* get_resident_address(void* address) {
 }
 
 char* existing_swap;
-int fd_page_offset = 0;
 
 void replace_swap(struct resident_node *resident_node) {
 
@@ -204,27 +201,14 @@ void replace_swap(struct resident_node *resident_node) {
   pathname = malloc(strlen(filename) + 1 + 5);
   strcpy(pathname, filename);
   strcat(pathname, ".swap");
-  // existing_swap = pathname;
 
-  // if (existing_swap != NULL && existing_swap != pathname) {
-  //   remove(existing_swap);
-  //   existing_swap = "";
-  //   fd_page_offset = 0;
-  // } else if (existing_swap == NULL) {
-  //   fd_page_offset = 0;    
-  // } else if (existing_swap == pathname) {
-  //   fd_page_offset++;
-  // }
   int offset = 0;
-  if (existing_swap == pathname || existing_swap == NULL) {
-    offset = insert_new_swapfile_node(resident_node->starting_addr);
-  } 
+  offset = insert_new_swapfile_node(resident_node->starting_addr);
+  existing_swap = pathname;
 
-  // TODO: write needs pwrite OFFSET =====================================================
-
-  int fd = open(pathname, O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IXUSR);
+  int fd = open(pathname, O_CREAT | O_RDWR | O_TRUNC, S_IRUSR | S_IWUSR);
   if (pwrite(fd, resident_node->starting_addr, pagesize, offset * pagesize) == -1) {
-    printf("Write error");
+    perror("Write error");
   }
 }
 
@@ -245,9 +229,13 @@ void evict_page() {
   if (temp->is_dirty == DIRTY) {
     replace_swap(temp);
   }
+
+
   if (madvise(addr, pagesize, MADV_DONTNEED) == -1) {
     printf("Error madvise");
   }
+
+
   mprotect(addr, pagesize, PROT_NONE);
 
   free(temp);
@@ -271,7 +259,7 @@ struct swap_file* get_swap_file_info(void* address) {
   return NULL;
 }
 
-void delete_swapfile_node(void* addr) {
+int delete_swapfile_node(void* addr) {
   struct swap_file* temp = swap_file;
   struct swap_file* prev = swap_file;
   while (temp != NULL && temp->starting_addr != addr) {
@@ -280,22 +268,35 @@ void delete_swapfile_node(void* addr) {
   }
 
   if (temp == NULL) {
-    return;
+    return 0;
   }
 
   prev->next = temp->next;
+  int offset = temp->page_offset;
   free(temp);
+  return offset;
 }
 
-void swap_file_restoration(void* addr, struct swap_file* swap_file) {
-
-  delete_swapfile_node(addr);
-
-  int fd = open(existing_swap, O_CREAT, S_IRUSR | S_IWUSR);
-  if (read(fd, addr, pagesize) == -1) {
-    printf("Error reading swap file");
+int search_swapnode_offset(void* addr) {
+  struct swap_file* temp = swap_file;
+  while (temp != NULL && temp->starting_addr != addr) {
+    temp = temp->next;
   }
-  swap_file->starting_addr = addr;
+
+  if (temp == NULL) {
+    return 0;
+  }
+
+  return temp->page_offset;
+}
+
+void swap_file_restoration(void* addr) {
+  int offset = search_swapnode_offset(addr);
+
+  int fd = open(existing_swap, O_RDONLY, 0777);
+  if (pread(fd, addr, pagesize, offset * pagesize) == -1) {
+    perror("Error reading swap file");
+  }
 }
 
 
@@ -314,10 +315,9 @@ void page_fault_handler(void* fault_address) {
 
   if (!is_resident) {  
 
-
     if (is_previously_evicted) {
       mprotect(fault_address, pagesize, PROT_READ | PROT_WRITE);
-      swap_file_restoration(fault_address, swap_file_information);
+      swap_file_restoration(fault_address);
     }
 
     // make the address resident
