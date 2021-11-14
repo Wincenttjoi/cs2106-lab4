@@ -94,38 +94,6 @@ void insert_new_node(void* addr, int size, int fd) {
   }
 }
 
-// each node inserted needs to by pagesize, chop the size first
-// void insert_new_node_map(void* addr, int size, int fd) {
-//   int offset_counter = 0;
-//   int total_pages = size / pagesize;
-//   struct mem_size_node *newNode, *temp;
-//   newNode = (struct mem_size_node*) malloc(sizeof(struct mem_size_node));
-//   newNode->starting_addr = addr;
-//   newNode->next = NULL;
-//   newNode->fd = fd;
-//   newNode->size = pagesize;
-
-//   // traverse temp pointer to last node
-//   if (virtual_mem_list->head == NULL) {
-//     temp = virtual_mem_list->head;
-//   } else {
-//     temp = virtual_mem_list->head;
-    
-//     while (temp != NULL && temp->next != NULL) {
-//       temp = temp->next;
-//     }
-//     // temp->next = newNode;
-//   }
-
-//   // append multiple new nodes with each of pagesize
-//   while (offset_counter < total_pages) {
-//     newNode->page_offset = offset_counter;
-//     temp->next = newNode;
-//     offset_counter++;
-//     temp = temp->next;
-//   }
-// }
-
 void insert_new_resident_node(void* addr) {
   struct resident_node *newNode, *temp;
   newNode = (struct resident_node*) malloc(sizeof(struct resident_node));
@@ -222,6 +190,27 @@ struct resident_node* get_resident_address(void* address) {
   return NULL;
 }
 
+struct mem_size_node* get_virtual_node(void* address) {
+  struct mem_size_node *temp;
+  if (virtual_mem_list == NULL || virtual_mem_list->head == NULL) {
+    return NULL;
+  }
+
+  temp = virtual_mem_list->head;
+  // printf("temp starting address %p", temp->starting_addr);
+  while (temp != NULL) {
+    char* temp_starting_address = (char*) temp->starting_addr;
+    char* temp_ending_address = temp->size + temp_starting_address;
+    char* addr = (char*) address;
+    if (addr >= temp_starting_address && addr <= temp_ending_address) {
+      return temp;
+    }
+    temp = temp->next;
+  }
+  // printf("address sent %p", address);
+  return NULL;
+}
+
 char* existing_swap;
 
 void replace_swap(struct resident_node *resident_node) {
@@ -246,9 +235,16 @@ void replace_swap(struct resident_node *resident_node) {
   existing_swap = pathname;
 }
 
-void evict_page() {
+void write_backing_file(struct resident_node* resident_node, int fd, int page_offset) {
+  if (pwrite(fd, resident_node->starting_addr, pagesize, page_offset) == -1) {
+    perror("Unable to write to backing file");
+  }
+}
+
+void evict_page(int fd, int page_offset) {
   // Removes the first page in resident linked list
   struct resident_node *temp = resident_mem_list->head;
+  int is_mapping = fd != FD_DONT_EXIST;
 
   if (resident_mem_list->head->next != NULL) {
     resident_mem_list->head = temp->next;
@@ -256,15 +252,13 @@ void evict_page() {
 
   void *addr = temp->starting_addr;
 
-
-  // Regard, write new contents to a swap file,
-  // physical page is freed by madvise on the page
-  // TODO: Write to swap file
-
   if (temp->is_dirty == DIRTY) {
     replace_swap(temp);
-  }
 
+    if (is_mapping) {
+      write_backing_file(temp, fd, page_offset);
+    }
+  }
 
   if (madvise(addr, pagesize, MADV_DONTNEED) == -1) {
     printf("Error madvise");
@@ -290,27 +284,6 @@ struct swap_file* get_swap_file_info(void* address) {
     }
     temp = temp->next;
   }
-  return NULL;
-}
-
-struct mem_size_node* get_virtual_node(void* address) {
-  struct mem_size_node *temp;
-  if (virtual_mem_list == NULL || virtual_mem_list->head == NULL) {
-    return NULL;
-  }
-
-  temp = virtual_mem_list->head;
-  // printf("temp starting address %p", temp->starting_addr);
-  while (temp != NULL) {
-    char* temp_starting_address = (char*) temp->starting_addr;
-    char* temp_ending_address = temp->size + temp_starting_address;
-    char* addr = (char*) address;
-    if (addr >= temp_starting_address && addr <= temp_ending_address) {
-      return temp;
-    }
-    temp = temp->next;
-  }
-  // printf("address sent %p", address);
   return NULL;
 }
 
@@ -355,10 +328,6 @@ void swap_file_restoration(void* addr) {
     perror("Error reading swap file");
   }
   close(fd);
-
-  // struct resident_node* temp_resident_node = get_resident_address(addr);
-  // temp_resident_node->is_dirty = NOT_DIRTY;
-  insert_new_resident_node(addr);
 }
 
 void fill_file_content(int fd, int page_offset, void* address) {
@@ -383,7 +352,7 @@ void page_fault_handler(void* fault_address) {
   int is_previously_evicted = swap_file_information != NULL;
 
   while (total_resident_bytes + pagesize > LORM) {
-    evict_page();
+    evict_page(fd, page_offset);
   }
 
   if (!is_mapping) {
@@ -404,7 +373,6 @@ void page_fault_handler(void* fault_address) {
   } else {
     if (!is_resident) {
       mprotect(fault_address, pagesize, PROT_READ | PROT_WRITE);
-      // todo: load the file into page
       fill_file_content(fd, page_offset, fault_address);
       mprotect(fault_address, pagesize, PROT_READ);
     } else {
@@ -486,6 +454,26 @@ void *userswap_alloc(size_t size) {
   return addr;
 }
 
+void write_dirty_page_to_backing_file(void *addr) {
+  struct mem_size_node* temp_memory_node = get_virtual_node(addr);
+  struct resident_node *temp;
+
+  temp = resident_mem_list->head;
+  // printf("temp starting address %p", temp->starting_addr);
+  while (temp != NULL) {
+    char* temp_starting_address = (char*) temp_memory_node->starting_addr;
+    char* temp_ending_address = temp_memory_node->size + temp_starting_address;
+    char* address = (char*) addr;
+    if (address >= temp_starting_address && address <= temp_ending_address) {
+      if (temp->is_dirty) {
+        write_backing_file(temp, temp_memory_node->fd, addr - temp_memory_node->starting_addr);
+      }
+    }
+    temp = temp->next;
+  }
+  // printf("address sent %p", address);
+}
+
 
 // mem can be assumed to be a pointer previously returned by userswap_alloc
 // or userswap_map, and that has not been previously freed.
@@ -532,6 +520,9 @@ void userswap_free(void *mem) {
 
   // free swap file
   delete_swapfile_node(mem);
+
+  // write dirty page back
+  write_dirty_page_to_backing_file(mem);
 }
 
 // This function should map the first size bytes of the file open in the file descriptor

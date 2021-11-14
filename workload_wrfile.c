@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 int main(int argc, char *argv[]) {
+  printf("testttt");
   (void)argc;
   (void)argv;
   const _Bool use_userswap = 1;
@@ -18,6 +19,8 @@ int main(int argc, char *argv[]) {
   if (!mem) {
     return 1;
   }
+  printf("Checkpoint 4");
+
 
   for (size_t i = 0; i < memory_size / sizeof(uintptr_t); ++i) {
     mem[i] = (uintptr_t)(mem + i);
@@ -52,6 +55,7 @@ int main(int argc, char *argv[]) {
     }
     file_map[i] = i;
   }
+  printf("Checkpoint 1");
 
   if (use_userswap) {
     userswap_free(file_map);
@@ -62,6 +66,8 @@ int main(int argc, char *argv[]) {
     }
     munmap(file_map, memory_size);
   }
+  printf("Checkpoint 2");
+
 
   if (pread(tempfile, mem, memory_size, 0) != memory_size) {
     fprintf(stderr, "Failed to write back from temporary file\n");
@@ -73,6 +79,8 @@ int main(int argc, char *argv[]) {
       failed = 1;
     }
   }
+  printf("Checkpoint 3");
+
 
   return failed;
 }
