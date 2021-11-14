@@ -290,6 +290,24 @@ struct swap_file* get_swap_file_info(void* address) {
   return NULL;
 }
 
+struct mem_size_node* get_virtual_node(void* address) {
+  struct mem_size_node *temp;
+  if (virtual_mem_list == NULL || virtual_mem_list->head == NULL) {
+    return NULL;
+  }
+
+  temp = virtual_mem_list->head;
+  // printf("temp starting address %p", temp->starting_addr);
+  while (temp != NULL) {
+    if (address == temp->starting_addr) {
+      return temp;
+    }
+    temp = temp->next;
+  }
+  // printf("address sent %p", address);
+  return NULL;
+}
+
 int delete_swapfile_node(void* addr) {
   struct swap_file* temp = swap_file;
   struct swap_file* prev = swap_file;
@@ -333,12 +351,25 @@ void swap_file_restoration(void* addr) {
   close(fd);
 }
 
+void fill_file_content(int fd, int page_offset, void* address) {
+  // int fd = open(pathname, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+  // if (pwrite(fd, resident_node->starting_addr, pagesize, offset * pagesize) == -1) {
+  //   perror("Write error");
+  // }
+  // close(fd);
+}
+
 
 void page_fault_handler(void* fault_address) {
   fault_address = align_address_to_start_page(fault_address);
 
   struct resident_node* temp_resident_node = get_resident_address(fault_address);
   int is_resident = temp_resident_node != NULL;
+
+  struct mem_size_node* temp_virtual_node = get_virtual_node(fault_address);
+  int fd = temp_virtual_node->fd;
+  int page_offset = temp_virtual_node->page_offset;
+  int is_mapping = fd != FD_DONT_EXIST;
 
   struct swap_file* swap_file_information = get_swap_file_info(fault_address);
   int is_previously_evicted = swap_file_information != NULL;
@@ -347,21 +378,33 @@ void page_fault_handler(void* fault_address) {
     evict_page();
   }
 
-  if (!is_resident) {  
+  if (!is_mapping) {
+    if (!is_resident) {  
+      if (is_previously_evicted) {
+        mprotect(fault_address, pagesize, PROT_READ | PROT_WRITE);
+        swap_file_restoration(fault_address);
+      }
 
-    if (is_previously_evicted) {
+      // make the address resident
+      insert_new_resident_node(fault_address);
+      mprotect(fault_address, pagesize, PROT_READ);
+    } else {
+      // page becomes dirty
       mprotect(fault_address, pagesize, PROT_READ | PROT_WRITE);
-      swap_file_restoration(fault_address);
-    }
-
-    // make the address resident
-    insert_new_resident_node(fault_address);
-    mprotect(fault_address, pagesize, PROT_READ);
+      temp_resident_node->is_dirty = DIRTY;
+    }    
   } else {
-    // page becomes dirty
-    mprotect(fault_address, pagesize, PROT_READ | PROT_WRITE);
-    temp_resident_node->is_dirty = DIRTY;
+    if (!is_resident) {
+      mprotect(fault_address, pagesize, PROT_READ | PROT_WRITE);
+      // todo: load the file into page
+      fill_file_content(fd, page_offset, fault_address);
+      mprotect(fault_address, pagesize, PROT_READ);
+    } else {
+      mprotect(fault_address, pagesize, PROT_READ | PROT_WRITE);
+      temp_resident_node->is_dirty = DIRTY;
+    }
   }
+
 }
 
 static void sigsegv_handler(int sig, siginfo_t* info, void* context) {
