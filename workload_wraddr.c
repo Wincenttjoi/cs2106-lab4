@@ -23,7 +23,7 @@ int main(int argc, char *argv[]) {
   _Bool failed = 0;
   for (size_t i = 0; i < memory_size / sizeof(uintptr_t); ++i) {
     if (mem[i] != (uintptr_t)(mem + i)) {
-      // printf("Failed at %p: %" PRIxPTR "\n", mem + i, mem[i]);
+      printf("Failed at %p: %" PRIxPTR "\n", mem + i, mem[i]);
       failed = 1;
     }
   }

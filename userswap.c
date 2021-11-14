@@ -12,8 +12,6 @@
 
 #define DIRTY 1
 #define NOT_DIRTY 0
-#define RESIDENT 1
-#define NOT_RESIDENT 0
 
 size_t pagesize = 4096;
 
@@ -116,7 +114,6 @@ void insert_new_resident_node(void* addr) {
 }
 
 int insert_new_swapfile_node(void* addr) {
-  printf("%p\n", addr);
   struct swap_file *newNode, *temp, *prev;
   newNode = (struct swap_file*) malloc(sizeof(struct swap_file));
   newNode->starting_addr = addr;
@@ -193,7 +190,7 @@ struct resident_node* get_resident_address(void* address) {
 char* existing_swap;
 
 void replace_swap(struct resident_node *resident_node) {
-
+  
   pid_t pid = getpid();
   char* pathname;
   char* filename = (char*)malloc(sizeof(char*));
@@ -204,12 +201,14 @@ void replace_swap(struct resident_node *resident_node) {
 
   int offset = 0;
   offset = insert_new_swapfile_node(resident_node->starting_addr);
-  existing_swap = pathname;
 
-  int fd = open(pathname, O_CREAT | O_RDWR | O_TRUNC, S_IRUSR | S_IWUSR);
+  int fd = open(pathname, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
   if (pwrite(fd, resident_node->starting_addr, pagesize, offset * pagesize) == -1) {
     perror("Write error");
   }
+  close(fd);
+
+  existing_swap = pathname;
 }
 
 void evict_page() {
@@ -234,7 +233,6 @@ void evict_page() {
   if (madvise(addr, pagesize, MADV_DONTNEED) == -1) {
     printf("Error madvise");
   }
-
 
   mprotect(addr, pagesize, PROT_NONE);
 
@@ -291,12 +289,15 @@ int search_swapnode_offset(void* addr) {
 }
 
 void swap_file_restoration(void* addr) {
+  mprotect(addr, pagesize, PROT_READ | PROT_WRITE);
+
   int offset = search_swapnode_offset(addr);
 
   int fd = open(existing_swap, O_RDONLY, 0777);
   if (pread(fd, addr, pagesize, offset * pagesize) == -1) {
     perror("Error reading swap file");
   }
+  close(fd);
 }
 
 
@@ -410,7 +411,7 @@ void *userswap_alloc(size_t size) {
 // to the memory region must be written to the file accordingly. The file descriptor
 // should not be closed. 
 void userswap_free(void *mem) {
-  // free virtual memory allocated
+  // free virtual memory allocated ====================================
   struct mem_size_node *ptr = virtual_mem_list->head;
   struct mem_size_node *ptr_prev = virtual_mem_list->head;
   if (ptr != NULL && ptr == mem) {
@@ -428,7 +429,7 @@ void userswap_free(void *mem) {
   munmap(ptr->starting_addr, ptr->size);
   free(ptr);
 
-  // free resident memory allocated
+  // free resident memory allocated ====================================
   struct resident_node *temp = resident_mem_list->head;
   struct resident_node *temp_prev = resident_mem_list->head;
   if (temp != NULL && temp == mem) {
@@ -444,7 +445,11 @@ void userswap_free(void *mem) {
   temp_prev->next = temp->next;
   free(temp);
 
+  // reset virtual memory used ========================================== 
   total_resident_bytes = 0;
+
+  // free swap file
+  delete_swapfile_node(mem);
 }
 
 // This function should map the first size bytes of the file open in the file descriptor
