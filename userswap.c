@@ -12,6 +12,8 @@
 
 #define DIRTY 1
 #define NOT_DIRTY 0
+#define RESIDENT 1
+#define NOT_RESIDENT 0
 
 size_t pagesize = 4096;
 
@@ -33,7 +35,7 @@ struct resident_node {
 
 struct swap_file {
   void* starting_addr;
-  int is_resident;
+  int page_offset;
   struct swap_file* next;
 };
 
@@ -110,9 +112,44 @@ void insert_new_resident_node(void* addr) {
     temp->next = newNode;
   }
 
-
-  total_resident_bytes += pagesize;
+  total_resident_bytes += (int) pagesize;
 }
+
+int insert_new_swapfile_node(void* addr) {
+  struct swap_file *newNode, *temp;
+  newNode = (struct swap_file*) malloc(sizeof(struct swap_file));
+  newNode->starting_addr = addr;
+  newNode->next = NULL;
+
+  int idx = 0;
+  if (swap_file == NULL) {
+    swap_file = newNode;
+  } else {
+    temp = swap_file;
+    int found_free_offset = 0;
+    while (temp != NULL && temp->next != NULL) {
+      if (temp->next->page_offset == idx + 1) {
+        idx++;
+        temp = temp->next;
+      } else {
+        idx++;
+        found_free_offset = 1;
+        break;
+      }
+    }
+    newNode->page_offset = idx;
+    if (found_free_offset) {
+      struct swap_file *temp2;
+      temp2 = temp->next;
+      temp->next = newNode;
+      newNode->next = temp2;
+    } else {
+      temp->next = newNode;
+    }
+  }
+  return idx;
+}
+
 
 // Returns 1 if its in virtual memory region (can be found in virtual memory linked list)
 int isInVirtualMemoryRegion(void* fault_address) {
@@ -137,29 +174,28 @@ int isInVirtualMemoryRegion(void* fault_address) {
 }
 
 // Returns the starting address of the resident page
-void* get_resident_address(void* address) {
+struct resident_node* get_resident_address(void* address) {
   struct resident_node *temp;
-  if (resident_mem_list->head == NULL) {
+  if (resident_mem_list == NULL || resident_mem_list->head == NULL) {
     return NULL;
   }
 
   temp = resident_mem_list->head;
+  // printf("temp starting address %p", temp->starting_addr);
   while (temp != NULL) {
     if (address == temp->starting_addr) {
-      return address;
+      return temp;
     }
     temp = temp->next;
   }
+  // printf("address sent %p", address);
   return NULL;
 }
 
 char* existing_swap;
+int fd_page_offset = 0;
 
 void replace_swap(struct resident_node *resident_node) {
-
-  if (existing_swap != NULL) {
-    remove(existing_swap);
-  }
 
   pid_t pid = getpid();
   char* pathname;
@@ -168,22 +204,39 @@ void replace_swap(struct resident_node *resident_node) {
   pathname = malloc(strlen(filename) + 1 + 5);
   strcpy(pathname, filename);
   strcat(pathname, ".swap");
-  existing_swap = pathname;
-  int fd = open(pathname, O_CREAT, S_IRUSR | S_IWUSR);
-  if (write(fd, resident_node->starting_addr, pagesize) == -1) {
+  // existing_swap = pathname;
+
+  // if (existing_swap != NULL && existing_swap != pathname) {
+  //   remove(existing_swap);
+  //   existing_swap = "";
+  //   fd_page_offset = 0;
+  // } else if (existing_swap == NULL) {
+  //   fd_page_offset = 0;    
+  // } else if (existing_swap == pathname) {
+  //   fd_page_offset++;
+  // }
+  int offset = 0;
+  if (existing_swap == pathname || existing_swap == NULL) {
+    offset = insert_new_swapfile_node(resident_node->starting_addr);
+  } 
+
+  // TODO: write needs pwrite OFFSET =====================================================
+
+  int fd = open(pathname, O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IXUSR);
+  if (pwrite(fd, resident_node->starting_addr, pagesize, offset * pagesize) == -1) {
     printf("Write error");
   }
 }
 
 void evict_page() {
-
   // Removes the first page in resident linked list
   struct resident_node *temp = resident_mem_list->head;
-  void *addr = resident_mem_list->head->starting_addr;
 
   if (resident_mem_list->head->next != NULL) {
-    resident_mem_list->head = resident_mem_list->head->next;
+    resident_mem_list->head = temp->next;
   }
+
+  void *addr = temp->starting_addr;
 
   // Regard, write new contents to a swap file,
   // physical page is freed by madvise on the page
@@ -192,13 +245,14 @@ void evict_page() {
   if (temp->is_dirty == DIRTY) {
     replace_swap(temp);
   }
-
+  if (madvise(addr, pagesize, MADV_DONTNEED) == -1) {
+    printf("Error madvise");
+  }
   mprotect(addr, pagesize, PROT_NONE);
-  madvise(addr, pagesize, MADV_DONTNEED);
 
   free(temp);
 
-  total_resident_bytes -= pagesize;
+  total_resident_bytes -= (int)pagesize;
 }
 
 struct swap_file* get_swap_file_info(void* address) {
@@ -217,7 +271,26 @@ struct swap_file* get_swap_file_info(void* address) {
   return NULL;
 }
 
+void delete_swapfile_node(void* addr) {
+  struct swap_file* temp = swap_file;
+  struct swap_file* prev = swap_file;
+  while (temp != NULL && temp->starting_addr != addr) {
+    prev = temp;
+    temp = temp->next;
+  }
+
+  if (temp == NULL) {
+    return;
+  }
+
+  prev->next = temp->next;
+  free(temp);
+}
+
 void swap_file_restoration(void* addr, struct swap_file* swap_file) {
+
+  delete_swapfile_node(addr);
+
   int fd = open(existing_swap, O_CREAT, S_IRUSR | S_IWUSR);
   if (read(fd, addr, pagesize) == -1) {
     printf("Error reading swap file");
@@ -234,12 +307,14 @@ void page_fault_handler(void* fault_address) {
 
   struct swap_file* swap_file_information = get_swap_file_info(fault_address);
   int is_previously_evicted = swap_file_information != NULL;
+
   while (total_resident_bytes + pagesize > LORM) {
     evict_page();
   }
 
-  if (!is_resident) {
-    
+  if (!is_resident) {  
+
+
     if (is_previously_evicted) {
       mprotect(fault_address, pagesize, PROT_READ | PROT_WRITE);
       swap_file_restoration(fault_address, swap_file_information);
