@@ -12,6 +12,7 @@
 
 #define DIRTY 1
 #define NOT_DIRTY 0
+#define FD_DONT_EXIST -1
 
 size_t pagesize = 4096;
 
@@ -22,6 +23,7 @@ int total_resident_bytes = 0;
 struct mem_size_node {
   void* starting_addr;
   int size;
+  int fd;
   struct mem_size_node *next;
 };
 
@@ -77,6 +79,7 @@ void insert_new_node(void* addr, int size) {
   newNode->starting_addr = addr;
   newNode->size = size;
   newNode->next = NULL;
+  newNode->fd = FD_DONT_EXIST;
 
   if (virtual_mem_list->head == NULL) {
     virtual_mem_list->head = newNode;
@@ -471,5 +474,44 @@ void userswap_free(void *mem) {
 // If the SIGSEGV handler has not yet been installed when this function is called,
 // then this function should do so. 
 void *userswap_map(int fd, size_t size) {
-  return NULL;
+  // Initialize
+  initialize_mem_list();
+  void *addr;
+
+  // ========================Install sigsev=================================
+  struct sigaction sa;
+  sa.sa_flags = SA_SIGINFO;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_sigaction = sigsegv_handler;
+  sigaction(SIGSEGV, &sa, NULL);
+
+
+
+  // If size is not a multiple of the page size, size should be rounded up to the next
+  // multiple of the page size.
+  // ========================================================================
+  size_t sizeForMmap = 0;
+
+  if (size <= pagesize) {
+    sizeForMmap = pagesize;
+  } else {
+    sizeForMmap = (int) (ceil((double)size / (double)pagesize) * pagesize);
+  }
+
+  // map first size bytes of the file in file descriptor
+
+
+
+  addr = mmap(NULL, sizeForMmap, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+
+
+  // =========================================================================
+  if (addr == MAP_FAILED) {
+    printf("Mapping failed");
+  } else {
+    // successful mapping
+    insert_new_node(addr, sizeForMmap);
+  }
+
+  return addr;
 }
