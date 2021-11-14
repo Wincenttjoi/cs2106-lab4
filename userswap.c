@@ -24,6 +24,7 @@ struct mem_size_node {
   void* starting_addr;
   int size;
   int fd;
+  int page_offset;
   struct mem_size_node *next;
 };
 
@@ -92,6 +93,35 @@ void insert_new_node(void* addr, int size) {
     }
     temp->next = newNode;
   }
+}
+
+// each node inserted needs to by pagesize, chop the size first
+void insert_new_node_map(void* addr, int size, int fd) {
+  int offset_counter = 0;
+  int total_pages = size / pagesize;
+  struct mem_size_node *newNode, *temp;
+  newNode = (struct mem_size_node*) malloc(sizeof(struct mem_size_node));
+  newNode->starting_addr = addr;
+  newNode->next = NULL;
+  newNode->fd = fd;
+  newNode->size = pagesize;
+
+  while (offset_counter < total_pages) {
+    newNode->page_offset = offset_counter;
+    if (virtual_mem_list->head == NULL) {
+      virtual_mem_list->head = newNode;
+    } else {
+      temp = virtual_mem_list->head;
+      
+      // Traverse to last node
+      while (temp != NULL && temp->next != NULL) {
+        temp = temp->next;
+      }
+      temp->next = newNode;
+    }
+    offset_counter++;
+  }
+
 }
 
 void insert_new_resident_node(void* addr) {
@@ -500,8 +530,6 @@ void *userswap_map(int fd, size_t size) {
 
   // map first size bytes of the file in file descriptor
 
-
-
   addr = mmap(NULL, sizeForMmap, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
 
 
@@ -510,7 +538,7 @@ void *userswap_map(int fd, size_t size) {
     printf("Mapping failed");
   } else {
     // successful mapping
-    insert_new_node(addr, sizeForMmap);
+    insert_new_node_map(addr, sizeForMmap, fd);
   }
 
   return addr;
