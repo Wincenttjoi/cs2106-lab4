@@ -256,6 +256,7 @@ void evict_page() {
 
   void *addr = temp->starting_addr;
 
+
   // Regard, write new contents to a swap file,
   // physical page is freed by madvise on the page
   // TODO: Write to swap file
@@ -354,6 +355,10 @@ void swap_file_restoration(void* addr) {
     perror("Error reading swap file");
   }
   close(fd);
+
+  // struct resident_node* temp_resident_node = get_resident_address(addr);
+  // temp_resident_node->is_dirty = NOT_DIRTY;
+  insert_new_resident_node(addr);
 }
 
 void fill_file_content(int fd, int page_offset, void* address) {
